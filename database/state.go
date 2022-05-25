@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"crypto/sha256"
-	"io/ioutil"
+	"time"
 )
 
 type SnapShot [32]byte
@@ -16,22 +15,9 @@ type State struct {
 	Balances map[Account]uint
 	txMempool []Tx
 	dbFile *os.File
-	snapshot SnapShot
+	latestBlockHash Hash
 }
 
-func (s *State) doSnapShot() error {
-	_, err := s.dbFile.Seek(0,0)
-	if err!=nil {
-		return err
-	}
-
-	txsData, err := ioutil.ReadAll(s.dbFile)
-	if err != nil {
-		return nil
-	}
-	s.snapshot = sha256.Sum256(txsData)
-	return nil
-}
 
 func NewStateFromDisk() (*State, error) {
 	cwd, err := os.Getwd()
@@ -49,45 +35,62 @@ func NewStateFromDisk() (*State, error) {
 		balances[account] = balance
 	}
 
-	txDbFilePath := filepath.Join(cwd,"database","tx.db")
+	txDbFilePath := filepath.Join(cwd,"database","block.db")
 	f, err := os.OpenFile(txDbFilePath,os.O_APPEND|os.O_RDWR,0600)
 	if err != nil {
 		return nil, err
 	}
 
 	scanner := bufio.NewScanner(f)
-	state := &State{balances,make([]Tx,0),f,SnapShot{}}
+	state := &State{balances,make([]Tx,0),f,Hash{}}
 
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return nil, err
 		}
 
-		var tx Tx
-		err = json.Unmarshal(scanner.Bytes(), &tx)
+		blockFsJson := scanner.Bytes()
+		var blockFs BlockFS
+		err = json.Unmarshal(blockFsJson,&blockFs)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := state.apply(tx); err != nil {
+		err = state.applyBlock(blockFs.Value)
+		if err != nil {
 			return nil, err
 		}
-	}
 
-	err = state.doSnapShot()
-	if err != nil {
-		return nil, err
+		state.latestBlockHash = blockFs.Key
 	}
 
 	return state, nil
 }
 
-func (s *State) Add(tx Tx)  error {
+func (s *State) AddBlock(b Block) error {
+	for  _, tx := range b.TXs {
+		if err := s.AddTx(tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *State) applyBlock(b Block) error {
+	for _, tx := range b.TXs {
+		if err := s.apply(tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *State) AddTx(tx Tx) error {
 	if err := s.apply(tx); err != nil {
 		return err
 	}
+	s.txMempool = append(s.txMempool,tx)
 
-	s.txMempool = append(s.txMempool, tx)
 	return nil
 }
 
@@ -107,38 +110,39 @@ func (s *State) apply( tx Tx) error {
 	return nil
 }
 
-func (s *State) Persist() (SnapShot , error) {
-	mempool := make([]Tx, len(s.txMempool))
-	copy(mempool,s.txMempool)
+func (s *State) Persist() (Hash, error) {
+	block := NewBlock(s.latestBlockHash, uint64(time.Now().Unix()),s.txMempool)
+	blockHash, err := block.Hash()
 
-	for i:=0; i < len(mempool); i++ {
-		txJson, err := json.Marshal(mempool[i])
-		if err!=nil {
-			return SnapShot{},nil
-		}
-
-		fmt.Printf("Presisting new Transaction to disk\n")
-		fmt.Printf("\t%s\n",txJson)
-
-		if _, err = s.dbFile.Write(append(txJson,'\n')); err != nil {
-			return SnapShot{},nil
-		}
-
-		err = s.doSnapShot()
-		if err!=nil {
-			return SnapShot{},err
-		}
-		fmt.Printf("New DB snapshot is : %x\n",s.snapshot)
-
-		s.txMempool = s.txMempool[i:]
+	if err != nil {
+		return Hash{}, err
 	}
-	return s.snapshot, nil
+
+	blockFs := BlockFS{blockHash,block}
+
+	blockFsJson, err := json.Marshal(blockFs)
+	if err != nil {
+		return Hash{}, err
+	}
+
+	fmt.Printf("Persisting new block to disk:\n")
+	fmt.Printf("\t%s\n",blockFsJson)
+
+	if _, err = s.dbFile.Write(append(blockFsJson,'\n')); err != nil {
+		return Hash{}, err
+	}
+
+	s.latestBlockHash = blockHash
+	s.txMempool = []Tx{}
+
+	return s.latestBlockHash, nil
+	
 }
 
 func (s *State) Close() error{
 	return s.dbFile.Close()
 }
 
-func (s *State) LatestSnapshot() SnapShot {
-	return s.snapshot
+func (s *State) LatestBlockHash() Hash {
+	return s.latestBlockHash
 }
