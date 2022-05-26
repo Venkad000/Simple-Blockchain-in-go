@@ -6,6 +6,8 @@ import (
 	"fmt"
 )
 
+const flagDataDir = "datadir"
+
 func main() {
 	var tbbCmd = &cobra.Command{
 		Use: "tbb",
@@ -29,4 +31,9 @@ func main() {
 
 func incorrectUsageErr() error {
 	return fmt.Errorf("incorrect usage")
+}
+
+func addDefaultRequiredFlags(cmd*cobra.Command) {
+	cmd.Flags().String(flagDataDir, "","Absolute path to the node of directory")
+	cmd.MarkFlagRequired(flagDataDir)
 }

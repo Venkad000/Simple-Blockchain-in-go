@@ -6,9 +6,9 @@ import (
 )
 
 const Major = "0"
-const Minor = "1"
+const Minor = "69"
 const Fix = "0"
-const Verbal = "TX Add && Balances List"
+const Verbal = "Transparent database"
 
 var versionCmd = &cobra.Command{
 	Use: "version",
