@@ -24,6 +24,7 @@ type Block struct {
 
 type BlockHeader struct {
 	Parent Hash
+	Number uint64
 	Time uint64
 }
 
@@ -32,8 +33,8 @@ type BlockFS struct {
 	Value Block
 }
 
-func NewBlock(parent Hash, time uint64, txs []Tx) Block {
-	return Block{BlockHeader{parent,time},txs}
+func NewBlock(parent Hash,number uint64, time uint64, txs []Tx) Block {
+	return Block{BlockHeader{parent,number,time},txs}
 }
 
 func (b Block) Hash() (Hash, error) {
